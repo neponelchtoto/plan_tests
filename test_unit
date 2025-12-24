@@ -1,0 +1,252 @@
+import unittest
+from datetime import datetime
+
+class TestRecipeManager(unittest.TestCase):
+    
+    def test_calculate_nutrition_with_cooking_method(self):
+        ingredients = [
+            {"name": "Картофель", "amount": 500, "unit": "г", "calories_raw": 77, "fat_raw": 0.1}
+        ]
+        
+        result = RecipeManager.calculate_nutrition(
+            ingredients=ingredients,
+            cooking_method="Жарка во фритюре",
+            temperature=180,
+            cooking_time=10,
+            oil_absorption=0.15
+        )
+        
+        self.assertGreater(result['calories'], 500)
+        self.assertGreater(result['fat'], 5)
+        self.assertLess(result['vitamin_c'], 30)
+        
+    def test_adapt_recipe_for_dietary_restrictions(self):
+        original_recipe = {
+            "name": "Салат Цезарь",
+            "ingredients": ["сухарики", "сыр пармезан", "яйцо", "салат", "соус цезарь"],
+            "steps": ["Смешать все ингредиенты", "Подавать сразу"]
+        }
+        
+        adapted = RecipeManager.adapt_for_diet(
+            recipe=original_recipe,
+            restrictions=["веган", "без глютена"],
+            substitution_db={
+                "сухарики": "гренки из безглютенового хлеба",
+                "сыр пармезан": "дрожжевые хлопья",
+                "яйцо": "аквафаба",
+                "соус цезарь": "веганский соус на основе тофу"
+            }
+        )
+        
+        self.assertNotIn("сыр", str(adapted['ingredients']).lower())
+        self.assertNotIn("яйцо", str(adapted['ingredients']).lower())
+        self.assertIn("безглютенового", str(adapted['ingredients']).lower())
+        self.assertEqual(adapted['name'], "Салат Цезарь (адаптированный)")
+        self.assertEqual(len(adapted['steps']), 2)
+        
+    def test_calculate_seasonal_cost(self):
+        recipe = {
+            "name": "Клубничный пирог",
+            "ingredients": [
+                {"name": "клубника", "amount": 500, "unit": "г"},
+                {"name": "мука", "amount": 300, "unit": "г"},
+                {"name": "сахар", "amount": 200, "unit": "г"},
+                {"name": "яйца", "amount": 3, "unit": "шт"},
+                {"name": "масло сливочное", "amount": 150, "unit": "г"}
+            ]
+        }
+        
+        cost_analysis = RecipeManager.calculate_seasonal_cost(
+            recipe=recipe,
+            date=datetime(2024, 1, 15),
+            region="Москва",
+            alternatives=["замороженная клубника", "яблоки", "груши"]
+        )
+        
+        self.assertGreater(cost_analysis['fresh_cost'], 500)
+        self.assertLess(cost_analysis['frozen_cost'], cost_analysis['fresh_cost'])
+        self.assertIn("экономия", cost_analysis['recommendation'])
+        self.assertIn("72%", cost_analysis['recommendation'])
+
+class TestShoppingGenerator(unittest.TestCase):
+    
+    def test_smart_consolidation_with_context(self):
+        lists = [
+            [
+                {"name": "Молоко 3.2%", "amount": 1, "unit": "л", "fat": 3.2},
+                {"name": "Хлеб белый", "amount": 1, "unit": "шт", "weight": 500}
+            ],
+            [
+                {"name": "Молоко 2.5%", "amount": 0.5, "unit": "л", "fat": 2.5},
+                {"name": "Сахар", "amount": 1, "unit": "кг", "type": "песок"}
+            ],
+            [
+                {"name": "Сливки 10%", "amount": 0.2, "unit": "л", "fat": 10},
+                {"name": "Масло сливочное", "amount": 0.2, "unit": "кг", "fat": 82.5}
+            ]
+        ]
+        
+        consolidated = ShoppingGenerator.smart_consolidate(
+            items_lists=lists,
+            context="выпечка",
+            allow_combining=True
+        )
+        
+        milk_items = [i for i in consolidated if "молоко" in i['name'].lower()]
+        self.assertEqual(len(milk_items), 1)
+        self.assertAlmostEqual(milk_items[0]['amount'], 1.5, places=1)
+        self.assertIn("~", milk_items[0]['name'])
+        
+        cream_items = [i for i in consolidated if "сливки" in i['name'].lower()]
+        self.assertEqual(len(cream_items), 1)
+        
+    def test_optimize_packaging_economics(self):
+        options = {
+            "small": {"weight": 200, "price": 100, "unit": "г"},
+            "large": {"weight": 500, "price": 200, "unit": "г"}
+        }
+        
+        analysis = ShoppingGenerator.optimize_packaging(
+            needed_amount=300,
+            packaging_options=options,
+            usage_history={"weekly_usage": 50, "unit": "г"},
+            shelf_life_after_opening=28
+        )
+        
+        self.assertEqual(analysis['recommendation'], 'large')
+        self.assertEqual(analysis['large_total_cost'], 200)
+        self.assertEqual(analysis['small_total_cost'], 200)
+        self.assertTrue(analysis['will_use_before_expiry'])
+        self.assertEqual(analysis['leftover_amount'], 200)
+        
+    def test_compare_store_strategies(self):
+        shopping_list = [
+            {"name": "Молоко", "amount": 1, "unit": "л"},
+            {"name": "Хлеб", "amount": 1, "unit": "шт"},
+            {"name": "Сыр", "amount": 0.3, "unit": "кг"},
+            {"name": "Кофе", "amount": 0.25, "unit": "кг"},
+            {"name": "Яйца", "amount": 10, "unit": "шт"},
+            {"name": "Масло", "amount": 0.2, "unit": "кг"}
+        ]
+        
+        stores = {
+            "local": {
+                "prices": {"Молоко": 80, "Хлеб": 50, "Сыр": 300, "Кофе": 500, "Яйца": 120, "Масло": 180},
+                "distance": 0.5,
+                "time_to_reach": 10,
+                "parking_cost": 0
+            },
+            "supermarket": {
+                "prices": {"Молоко": 70, "Хлеб": 40, "Сыр": 270, "Кофе": 450, "Яйца": 100, "Масло": 160},
+                "distance": 5,
+                "time_to_reach": 20,
+                "parking_cost": 50
+            }
+        }
+        
+        strategies = ShoppingGenerator.compare_store_strategies(
+            shopping_list=shopping_list,
+            stores=stores,
+            time_value=100
+        )
+        
+        self.assertIn(strategies['best_strategy']['name'], ['local_only', 'supermarket_only', 'mixed'])
+        self.assertTrue(strategies['best_strategy']['total_cost'] > 0)
+        self.assertTrue(strategies['best_strategy']['total_time'] > 0)
+        self.assertEqual(len(strategies['all_strategies']), 3)
+
+class TestBudgetManager(unittest.TestCase):
+    
+    def test_predict_spending_with_ml(self):
+        history = {
+            "monthly_average": 8000,
+            "seasonal_pattern": {"winter": 1.15, "spring": 0.95, "summer": 0.9, "autumn": 1.05},
+            "weekly_variance": 0.2,
+            "trend_slope": 0.02
+        }
+        
+        trends = {
+            "inflation": 7.0,
+            "vegetable_price_increase": 12.0,
+            "meat_price_stable": True,
+            "dairy_price_increase": 5.0
+        }
+        
+        events = ["Новый год", "Рождество", "День рождения"]
+        
+        prediction = BudgetManager.predict_spending(
+            history=history,
+            trends=trends,
+            events=events,
+            forecast_date=datetime(2024, 12, 15),
+            model_version="v2.1"
+        )
+        
+        self.assertGreater(prediction['predicted_amount'], 8000)
+        self.assertLess(prediction['confidence_interval'][0], prediction['predicted_amount'])
+        self.assertGreater(prediction['confidence_interval'][1], prediction['predicted_amount'])
+        self.assertEqual(len(prediction['recommendations']), 3)
+        
+    def test_calculate_waste_impact(self):
+        purchases = [
+            {"item": "Морковь", "amount": 1, "unit": "кг", "price": 80, "waste_percentage": 20},
+            {"item": "Куриное филе", "amount": 0.5, "unit": "кг", "price": 300, "waste_percentage": 8},
+            {"item": "Батон", "amount": 1, "unit": "шт", "price": 40, "waste_percentage": 15},
+            {"item": "Помидоры", "amount": 1, "unit": "кг", "price": 150, "waste_percentage": 10},
+            {"item": "Картофель", "amount": 2, "unit": "кг", "price": 100, "waste_percentage": 15}
+        ]
+        
+        analysis = BudgetManager.calculate_waste_impact(
+            purchases=purchases,
+            include_packaging=True,
+            include_preparation_loss=True
+        )
+        
+        self.assertGreater(analysis['effective_cost_per_kg'], 80)
+        self.assertTrue(analysis['total_waste_cost'] > 0)
+        self.assertEqual(len(analysis['reduction_tips']), 5)
+        self.assertIn("ботва", analysis['reduction_tips'][0].lower())
+
+class TestMealPlanner(unittest.TestCase):
+    
+    def test_balance_macronutrients(self):
+        current_plan = {
+            "days": {
+                "monday": [
+                    {"meal": "breakfast", "carbs": 70, "protein": 20, "fat": 10, "calories": 450},
+                    {"meal": "lunch", "carbs": 80, "protein": 15, "fat": 15, "calories": 550},
+                    {"meal": "dinner", "carbs": 60, "protein": 25, "fat": 15, "calories": 500}
+                ],
+                "tuesday": [
+                    {"meal": "breakfast", "carbs": 65, "protein": 25, "fat": 10, "calories": 470},
+                    {"meal": "lunch", "carbs": 85, "protein": 20, "fat": 15, "calories": 580},
+                    {"meal": "dinner", "carbs": 70, "protein": 30, "fat": 20, "calories": 600}
+                ],
+                "wednesday": [
+                    {"meal": "breakfast", "carbs": 60, "protein": 30, "fat": 10, "calories": 480},
+                    {"meal": "lunch", "carbs": 90, "protein": 25, "fat": 20, "calories": 620},
+                    {"meal": "dinner", "carbs": 75, "protein": 35, "fat": 25, "calories": 650}
+                ]
+            }
+        }
+        
+        goals = {
+            "daily": {"carbs": 300, "protein": 100, "fat": 70, "calories": 1500},
+            "tolerances": {"carbs": 0.1, "protein": 0.15, "fat": 0.2, "calories": 0.1}
+        }
+        
+        balanced = MealPlanner.balance_macronutrients(
+            current_plan=current_plan,
+            goals=goals,
+            recipe_db_size=200,
+            max_recipe_repeats=2
+        )
+        
+        daily_totals = balanced['weekly_summary']['average_daily']
+        self.assertAlmostEqual(daily_totals['protein'], 100, delta=15)
+        self.assertAlmostEqual(daily_totals['carbs'], 300, delta=30)
+        self.assertAlmostEqual(daily_totals['fat'], 70, delta=14)
+        self.assertAlmostEqual(daily_totals['calories'], 1500, delta=150)
+
+if __name__ == '__main__':
+    unittest.main()
