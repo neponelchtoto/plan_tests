@@ -1,0 +1,288 @@
+import unittest
+from datetime import datetime, timedelta
+
+class TestIntegrationSmartPlanning(unittest.TestCase):
+    
+    def test_full_smart_planning_cycle(self):
+        request = {
+            "user_id": 123,
+            "duration_days": 7,
+            "calorie_target": 1500,
+            "budget_limit": 8000,
+            "use_pantry": True,
+            "dietary_restrictions": ["без глютена"],
+            "preferred_cuisine": ["европейская", "азиатская"]
+        }
+        
+        meal_plan = MealPlanner.generate_weekly_plan(
+            user_id=request["user_id"],
+            days=request["duration_days"],
+            calorie_target=request["calorie_target"],
+            restrictions=request["dietary_restrictions"],
+            cuisine=request["preferred_cuisine"]
+        )
+        
+        self.assertEqual(meal_plan["plan_id"], "plan_001")
+        self.assertEqual(len(meal_plan["days"]), 7)
+        self.assertEqual(meal_plan["days"]["monday"][0]["meal"], "breakfast")
+        self.assertEqual(meal_plan["days"]["monday"][0]["recipe_id"], "rec1")
+        self.assertEqual(meal_plan["days"]["monday"][0]["calories"], 350)
+        self.assertEqual(meal_plan["days"]["monday"][1]["meal"], "lunch")
+        self.assertEqual(meal_plan["days"]["monday"][1]["recipe_id"], "rec2")
+        self.assertEqual(meal_plan["days"]["monday"][1]["calories"], 500)
+        self.assertEqual(meal_plan["days"]["monday"][2]["meal"], "dinner")
+        self.assertEqual(meal_plan["days"]["monday"][2]["recipe_id"], "rec3")
+        self.assertEqual(meal_plan["days"]["monday"][2]["calories"], 450)
+        
+        shopping_list = ShoppingGenerator.generate_shopping_list(
+            plan_id=meal_plan["plan_id"],
+            user_pantry={"rice": 500, "spices": True, "oil": 200, "salt": 1000}
+        )
+        
+        self.assertEqual(len(shopping_list["shopping_list"]), 15)
+        self.assertEqual(shopping_list["shopping_list"][0]["item"], "Курица")
+        self.assertEqual(shopping_list["shopping_list"][0]["amount"], 1.5)
+        self.assertEqual(shopping_list["shopping_list"][0]["unit"], "кг")
+        self.assertEqual(shopping_list["shopping_list"][0]["price"], 450)
+        self.assertEqual(shopping_list["shopping_list"][1]["item"], "Овощи")
+        self.assertEqual(shopping_list["shopping_list"][1]["amount"], 3)
+        self.assertEqual(shopping_list["shopping_list"][1]["unit"], "кг")
+        self.assertEqual(shopping_list["shopping_list"][1]["price"], 300)
+        
+        budget_check = BudgetManager.check_budget(
+            user_id=request["user_id"],
+            planned_cost=shopping_list["total_cost"],
+            budget_limit=request["budget_limit"]
+        )
+        
+        self.assertFalse(budget_check["within_budget"])
+        self.assertEqual(budget_check["excess"], 500)
+        self.assertEqual(budget_check["suggestions"][0], "Заменить говядину на курицу")
+        self.assertEqual(budget_check["suggestions"][1], "Уменьшить порции на 10%")
+        self.assertEqual(budget_check["suggestions"][2], "Исключить деликатесы")
+        
+        optimized = MealPlanner.optimize_for_budget(
+            original_plan=meal_plan,
+            budget_excess=budget_check["excess"],
+            max_changes=3
+        )
+        
+        self.assertEqual(optimized["optimized_plan"]["plan_id"], "plan_001_optimized")
+        self.assertEqual(len(optimized["changes_made"]), 3)
+        self.assertEqual(optimized["changes_made"][0], "Заменены 3 дорогих рецепта")
+        self.assertEqual(optimized["changes_made"][1], "Уменьшены порции на 5%")
+        self.assertEqual(optimized["changes_made"][2], "Добавлены сезонные овощи")
+        self.assertEqual(optimized["new_estimated_cost"], 7800)
+        
+        shopping_list["total_cost"] = 7800
+        
+        save_result = DataManager.save_plan(
+            user_id=request["user_id"],
+            plan=optimized["optimized_plan"],
+            shopping_list=shopping_list,
+            budget_analysis=budget_check
+        )
+        
+        self.assertTrue(save_result["success"])
+        self.assertEqual(save_result["plan_id"], "saved_001")
+        self.assertEqual(save_result["shopping_list_id"], "list_001")
+        self.assertEqual(save_result["budget_analysis_id"], "analysis_001")
+        
+        final_result = Controller.process_planning_request(request)
+        
+        self.assertEqual(final_result["plan_id"], "saved_001")
+        self.assertEqual(len(final_result["shopping_list"]), 15)
+        self.assertEqual(final_result["budget_analysis"]["within_budget"], True)
+        self.assertEqual(final_result["budget_analysis"]["final_cost"], 7800)
+        self.assertEqual(final_result["budget_analysis"]["budget_limit"], 8000)
+        self.assertEqual(final_result["budget_analysis"]["remaining_budget"], 200)
+
+class TestIntegrationRecipeAdaptation(unittest.TestCase):
+    
+    def test_dynamic_ingredient_substitution(self):
+        original_recipe = {
+            "id": "rec_borscht",
+            "name": "Борщ",
+            "ingredients": [
+                {"name": "свекла", "amount": 2, "unit": "шт", "category": "овощи"},
+                {"name": "капуста", "amount": 0.3, "unit": "кг", "category": "овощи"},
+                {"name": "картофель", "amount": 3, "unit": "шт", "category": "овощи"},
+                {"name": "морковь", "amount": 1, "unit": "шт", "category": "овощи"},
+                {"name": "лук", "amount": 1, "unit": "шт", "category": "овощи"},
+                {"name": "говядина", "amount": 0.5, "unit": "кг", "category": "мясо"},
+                {"name": "томатная паста", "amount": 2, "unit": "ст.л.", "category": "соусы"},
+                {"name": "сметана", "amount": 100, "unit": "г", "category": "молочные"},
+                {"name": "укроп", "amount": 10, "unit": "г", "category": "зелень"}
+            ],
+            "steps": [
+                "Подготовить овощи",
+                "Сварить мясо",
+                "Добавить овощи",
+                "Варить 40 минут",
+                "Подавать со сметаной"
+            ]
+        }
+        
+        user_pantry = {
+            "свекла": 1,
+            "капуста": 0.5,
+            "картофель": 5,
+            "морковь": 2,
+            "лук": 3,
+            "говядина": 0,
+            "томатная паста": 1,
+            "сметана": 0,
+            "укроп": 5
+        }
+        
+        substitution_db = {
+            "свекла": [{"name": "морковь", "ratio": 1.5}, {"name": "томатная паста", "ratio": 0.3}],
+            "говядина": [{"name": "грибы", "ratio": 1.2}, {"name": "фасоль", "ratio": 1.5}, {"name": "чечевица", "ratio": 1.3}],
+            "сметана": [{"name": "йогурт", "ratio": 1.0}, {"name": "майонез", "ratio": 0.8}]
+        }
+        
+        adapted = RecipeManager.adapt_to_pantry(
+            recipe=original_recipe,
+            pantry=user_pantry,
+            substitutions=substitution_db,
+            similarity_threshold=0.7
+        )
+        
+        self.assertEqual(adapted["adapted_recipe"]["name"], "Вегетарианский борщ с грибами")
+        self.assertEqual(len(adapted["adapted_recipe"]["ingredients"]), 9)
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][0]["name"], "свекла")
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][0]["amount"], 1)
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][0]["source"], "pantry")
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][1]["name"], "морковь")
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][1]["amount"], 2)
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][1]["source"], "new")
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][5]["name"], "грибы")
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][5]["amount"], 0.6)
+        self.assertEqual(adapted["adapted_recipe"]["ingredients"][5]["source"], "new")
+        self.assertAlmostEqual(adapted["similarity_score"], 0.85, places=2)
+        self.assertEqual(adapted["cost_savings"], 0.4)
+        self.assertEqual(len(adapted["adapted_recipe"]["steps"]), 5)
+        
+        shopping_list = ShoppingGenerator.generate_for_recipe(
+            recipe=adapted["adapted_recipe"],
+            exclude_pantry=True,
+            store_preferences=["Ашан", "Магнит"]
+        )
+        
+        self.assertEqual(len(shopping_list["shopping_list"]), 4)
+        self.assertEqual(shopping_list["shopping_list"][0]["item"], "морковь")
+        self.assertEqual(shopping_list["shopping_list"][0]["amount"], 2)
+        self.assertEqual(shopping_list["shopping_list"][0]["unit"], "шт")
+        self.assertEqual(shopping_list["shopping_list"][0]["estimated_price"], 40)
+        self.assertEqual(shopping_list["shopping_list"][1]["item"], "картофель")
+        self.assertEqual(shopping_list["shopping_list"][1]["amount"], 3)
+        self.assertEqual(shopping_list["shopping_list"][1]["unit"], "шт")
+        self.assertEqual(shopping_list["shopping_list"][1]["estimated_price"], 60)
+        self.assertEqual(shopping_list["shopping_list"][2]["item"], "грибы")
+        self.assertEqual(shopping_list["shopping_list"][2]["amount"], 0.6)
+        self.assertEqual(shopping_list["shopping_list"][2]["unit"], "кг")
+        self.assertEqual(shopping_list["shopping_list"][2]["estimated_price"], 150)
+        self.assertEqual(shopping_list["shopping_list"][3]["item"], "йогурт")
+        self.assertEqual(shopping_list["shopping_list"][3]["amount"], 100)
+        self.assertEqual(shopping_list["shopping_list"][3]["unit"], "г")
+        self.assertEqual(shopping_list["shopping_list"][3]["estimated_price"], 80)
+        self.assertEqual(shopping_list["total_cost"], 330)
+        self.assertEqual(shopping_list["original_cost"], 650)
+        self.assertEqual(shopping_list["savings_percentage"], 49)
+
+class TestIntegrationMultiLevelBudgetOptimization(unittest.TestCase):
+    
+    def test_cascade_budget_optimization(self):
+        initial_plan = {
+            "estimated_cost": 12000,
+            "recipes": ["стейк рибай", "лосось гриль", "авокадо", "пармезан", "спаржа", "трюфельное масло", "икра"],
+            "nutrition": {"calories": 1800, "protein": 90, "carbs": 150, "fat": 80},
+            "ingredients": [
+                {"name": "говядина", "amount": 1, "unit": "кг", "price": 2000},
+                {"name": "лосось", "amount": 0.8, "unit": "кг", "price": 1600},
+                {"name": "авокадо", "amount": 4, "unit": "шт", "price": 800},
+                {"name": "пармезан", "amount": 0.3, "unit": "кг", "price": 900},
+                {"name": "спаржа", "amount": 0.5, "unit": "кг", "price": 700},
+                {"name": "трюфельное масло", "amount": 0.1, "unit": "кг", "price": 1500},
+                {"name": "икра", "amount": 0.05, "unit": "кг", "price": 2500}
+            ]
+        }
+        
+        budget_limit = 7000
+        
+        level1 = ShoppingGenerator.optimize_brands(
+            plan=initial_plan,
+            brand_strategy="premium_to_standard",
+            max_price_reduction=0.15
+        )
+        
+        self.assertEqual(level1["optimized_cost"], 10200)
+        self.assertEqual(level1["savings"], 1800)
+        self.assertEqual(len(level1["changes"]), 7)
+        self.assertEqual(level1["changes"][0], "Премиум -> обычный бренд")
+        self.assertEqual(level1["changes"][1], "Импортный -> местный")
+        self.assertEqual(level1["changes"][2], "Органический -> обычный")
+        
+        level2 = MealPlanner.substitute_ingredients(
+            plan=level1,
+            substitution_rules={
+                "стейк рибай": ["стейк чак-ай", "свиная вырезка", "куриное филе"],
+                "лосось": ["треска", "минтай", "тилапия"],
+                "пармезан": ["российский сыр", "гауда", "эдам"],
+                "трюфельное масло": ["оливковое масло с чесноком", "сливочное масло"],
+                "икра": ["паштет", "копченая рыба"]
+            }
+        )
+        
+        self.assertEqual(level2["optimized_cost"], 8160)
+        self.assertEqual(level2["savings"], 2040)
+        self.assertEqual(len(level2["changes"]), 5)
+        self.assertEqual(level2["changes"][0], "Лосось -> треска")
+        self.assertEqual(level2["changes"][1], "Пармезан -> российский сыр")
+        self.assertEqual(level2["changes"][2], "Трюфельное масло -> оливковое масло с чесноком")
+        self.assertEqual(level2["changes"][3], "Икра -> паштет")
+        self.assertEqual(level2["nutrition_impact"]["protein"], -5)
+        self.assertEqual(level2["nutrition_impact"]["calories"], -2)
+        
+        level3 = MealPlanner.adjust_meal_plan(
+            plan=level2,
+            adjustments={
+                "remove_meal": True,
+                "reduce_portions": 0.1,
+                "add_cheap_meals": 2
+            }
+        )
+        
+        self.assertEqual(level3["optimized_cost"], 7344)
+        self.assertEqual(level3["savings"], 816)
+        self.assertEqual(len(level3["changes"]), 3)
+        self.assertEqual(level3["changes"][0], "Убрать один прием пищи")
+        self.assertEqual(level3["changes"][1], "Уменьшить порции на 10%")
+        self.assertEqual(level3["changes"][2], "Добавить 2 бюджетных блюда")
+        self.assertEqual(level3["nutrition_impact"]["protein"], -8)
+        self.assertEqual(level3["nutrition_impact"]["calories"], -10)
+        
+        level4 = BudgetManager.optimize_portions(
+            plan=level3,
+            portion_reduction=0.05,
+            use_leftovers=True
+        )
+        
+        self.assertEqual(level4["optimized_cost"], 6977)
+        self.assertEqual(level4["savings"], 367)
+        self.assertEqual(len(level4["changes"]), 2)
+        self.assertEqual(level4["changes"][0], "Порции уменьшены на 5%")
+        self.assertEqual(level4["changes"][1], "Использовать остатки прошлой недели")
+        self.assertEqual(level4["nutrition_impact"]["protein"], -2)
+        self.assertEqual(level4["nutrition_impact"]["calories"], -5)
+        
+        total_savings = 1800 + 2040 + 816 + 367
+        self.assertEqual(total_savings, 5023)
+        
+        total_protein_loss = 5 + 8 + 2
+        self.assertEqual(total_protein_loss, 15)
+        
+        self.assertLessEqual(level4["optimized_cost"], budget_limit)
+
+if __name__ == '__main__':
+    unittest.main()
